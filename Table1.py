@@ -86,6 +86,33 @@ label = [
     "Was patient management altered as a result of the scan data?",
 ]
 
+# Build a long-format dataframe for grouping by the last four label questions (Yes-only rows)
+label_group_cols = [
+    "Did the patients' suspected diagnosis change post MR",
+    "Did MRI provide additional information to the existing diagnosis? (ie quantity of iron, location of scar, etc) ",
+    " Was the pre-MRI (tentative) diagnosis confirmed?",
+    "Was patient management altered as a result of the scan data?",
+]
+
+label_group_dfs = []
+for label_col in label_group_cols:
+    if label_col in df.columns:
+        label_numeric = pd.to_numeric(df[label_col], errors="coerce").fillna(0)
+        subset_df = df.loc[label_numeric > 0].copy()
+        subset_df["LabelGroup"] = label_col
+        label_group_dfs.append(subset_df)
+
+if len(label_group_dfs) == 0:
+    raise ValueError(
+        "None of the specified label group columns were found in the dataset."
+    )
+
+df_label_groups = pd.concat(label_group_dfs, ignore_index=True)
+# Ensure consistent ordering for the group columns in outputs
+df_label_groups["LabelGroup"] = pd.Categorical(
+    df_label_groups["LabelGroup"], categories=label_group_cols, ordered=True
+)
+
 
 tfe = [
     "TFE (exact sequence listed)",
@@ -168,9 +195,12 @@ viab = [
 ]
 
 
-def create_table1(group_name, columns, discrete):
-    # Convert non-numeric values to NaN for all columns
-    df[columns] = df[columns].apply(pd.to_numeric, errors="coerce")
+def create_table1(group_name, columns, discrete, input_df, groupby_var, rename_map=None):
+    # Work on a copy to avoid altering original dataframes
+    table_df = input_df.copy()
+
+    # Convert non-numeric values to NaN for all columns selected
+    table_df[columns] = table_df[columns].apply(pd.to_numeric, errors="coerce")
 
     # Determine continuous columns (all columns minus discrete)
     continuous = [col for col in columns if col not in discrete]
@@ -179,31 +209,22 @@ def create_table1(group_name, columns, discrete):
     nonnormal = []
     for col in continuous:
         if (
-            col in df.columns and len(df[col].dropna()) > 3
+            col in table_df.columns and len(table_df[col].dropna()) > 3
         ):  # Need at least 4 values for Shapiro test
-            stat, p = shapiro(df[col].dropna())
+            stat, p = shapiro(table_df[col].dropna())
             if p < 0.05:  # Non-normal if p < 0.05
                 nonnormal.append(col)
     print(f"Non-normal continuous variables: {nonnormal}")
 
     # Create TableOne instance with nonnormal variables and ignore NaN in p-values
     table1 = TableOne(
-        df,
+        table_df,
         columns=columns,
-        groupby="MR_indication_simplified",
+        groupby=groupby_var,
         pval=True,
         nonnormal=nonnormal,  # Use nonnormal list based on normality test
         categorical=discrete,
-        rename={
-            1: "Infiltrative",
-            2: "Valvulopathy",
-            3: "HOCM",
-            4: "Mypericarditis",
-            5: "Ischemia",
-            6: "Other Unexplained CMP",
-            7: "Other",
-            8: "VT",
-        },
+        rename=rename_map,
         missing=True,
         pval_adjust="bonferroni",  # Adjusts p-values, handles NaN implicitly by default
     )
@@ -268,9 +289,40 @@ discrete_label = [
     "Was patient management altered as a result of the scan data?",
 ]
 
-# Create Table 1 for each group
-create_table1("demo", demo, discrete_demo)
-create_table1("disease", disease, discrete_disease)
-create_table1("device_info", device_info, discrete_device_info)
-create_table1("position", position, discrete_position)
-create_table1("label", label, discrete_label)
+# Create Table 1 for each group, now grouped by the four label questions (LabelGroup)
+create_table1("demo", demo, discrete_demo, df_label_groups, "LabelGroup")
+create_table1("disease", disease, discrete_disease, df_label_groups, "LabelGroup")
+create_table1(
+    "device_info", device_info, discrete_device_info, df_label_groups, "LabelGroup"
+)
+create_table1("position", position, discrete_position, df_label_groups, "LabelGroup")
+create_table1("label", label, discrete_label, df_label_groups, "LabelGroup")
+
+# New: Create a separate MRI indication table with MRI indication groups as rows
+mri_rename_map = {
+    1: "Infiltrative",
+    2: "Valvulopathy",
+    3: "HOCM",
+    4: "Mypericarditis",
+    5: "Ischemia",
+    6: "Other Unexplained CMP",
+    7: "Other",
+    8: "VT",
+}
+
+mri_counts = df["MR_indication_simplified"].value_counts(dropna=False).sort_index()
+mri_rows = []
+for key, count in mri_counts.items():
+    if pd.isna(key):
+        display_name = "Missing"
+    else:
+        try:
+            display_name = mri_rename_map.get(int(key), key)
+        except Exception:
+            display_name = str(key)
+    mri_rows.append({"MRI indication": display_name, "Count": int(count)})
+
+mri_table_df = pd.DataFrame(mri_rows)
+mri_output_file = "/home/sunx/data/aiiih/projects/sunx/projects/CIED/table1_MRI_indication.xlsx"
+mri_table_df.to_excel(mri_output_file, index=False)
+print(f"MRI indication table has been saved to {mri_output_file}")
