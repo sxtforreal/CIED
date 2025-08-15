@@ -314,15 +314,9 @@ mri_rename_map = {
 df["MR_indication_group"] = df["MR_indication_simplified"].map(mri_rename_map).astype("object")
 df["MR_indication_group"] = df["MR_indication_group"].fillna("Missing")
 
-# Build a TableOne summarizing key variables by MRI indication
-mri_columns = demo + disease + device_info + position + label
-mri_categorical = (
-    discrete_demo
-    + discrete_disease
-    + discrete_device_info
-    + discrete_position
-    + discrete_label
-)
+# Build a TableOne summarizing four label outcomes by MRI indication
+mri_columns = label_group_cols
+mri_categorical = label_group_cols
 
 create_table1(
     "MRI_indication",
