@@ -314,14 +314,29 @@ mri_rename_map = {
 df["MR_indication_group"] = df["MR_indication_simplified"].map(mri_rename_map).astype("object")
 df["MR_indication_group"] = df["MR_indication_group"].fillna("Missing")
 
-# Build a TableOne summarizing four label outcomes by MRI indication
-mri_columns = label_group_cols
-mri_categorical = label_group_cols
-
-create_table1(
-    "MRI_indication",
-    mri_columns,
-    mri_categorical,
-    df,
-    "MR_indication_group",
+# Reorder MR_indication_group categories so output rows are in numeric order + Missing
+mri_category_order = [mri_rename_map[k] for k in sorted(mri_rename_map.keys())] + ["Missing"]
+df["MR_indication_group"] = pd.Categorical(
+    df["MR_indication_group"], categories=mri_category_order, ordered=True
 )
+
+# Ensure the four label outcome columns are numeric (treat non-numeric as 0)
+for col in label_group_cols:
+    df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+
+# Build counts and percentages of "Yes" (>0) per MR indication (rows) across four outcomes (columns)
+yes_counts = df.groupby("MR_indication_group")[label_group_cols].apply(lambda g: (g > 0).sum())
+
+# Denominators per MR indication group
+group_sizes = df.groupby("MR_indication_group").size()
+
+# Percentages
+percentages = (yes_counts.div(group_sizes, axis=0) * 100).round(1)
+
+# Format as "count (percent%)"
+pivot_formatted = yes_counts.astype(int).astype(str) + " (" + percentages.astype(str) + "%)"
+
+# Save to Excel
+output_file = "/home/sunx/data/aiiih/projects/sunx/projects/CIED/mri_indication_by_label.xlsx"
+pivot_formatted.to_excel(output_file)
+print(f"Saved MRI indication by label table to {output_file}")
