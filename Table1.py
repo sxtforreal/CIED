@@ -298,31 +298,36 @@ create_table1(
 create_table1("position", position, discrete_position, df_label_groups, "LabelGroup")
 create_table1("label", label, discrete_label, df_label_groups, "LabelGroup")
 
-# New: Create a separate MRI indication table with MRI indication groups as rows
+# New: Create MRI indication TableOne grouped by MRI indication categories
 mri_rename_map = {
     1: "Infiltrative",
     2: "Valvulopathy",
     3: "HOCM",
-    4: "Mypericarditis",
+    4: "Myopericarditis",
     5: "Ischemia",
     6: "Other Unexplained CMP",
     7: "Other",
     8: "VT",
 }
 
-mri_counts = df["MR_indication_simplified"].value_counts(dropna=False).sort_index()
-mri_rows = []
-for key, count in mri_counts.items():
-    if pd.isna(key):
-        display_name = "Missing"
-    else:
-        try:
-            display_name = mri_rename_map.get(int(key), key)
-        except Exception:
-            display_name = str(key)
-    mri_rows.append({"MRI indication": display_name, "Count": int(count)})
+# Add a human-readable group column for MRI indication
+df["MR_indication_group"] = df["MR_indication_simplified"].map(mri_rename_map).astype("object")
+df["MR_indication_group"] = df["MR_indication_group"].fillna("Missing")
 
-mri_table_df = pd.DataFrame(mri_rows)
-mri_output_file = "/home/sunx/data/aiiih/projects/sunx/projects/CIED/table1_MRI_indication.xlsx"
-mri_table_df.to_excel(mri_output_file, index=False)
-print(f"MRI indication table has been saved to {mri_output_file}")
+# Build a TableOne summarizing key variables by MRI indication
+mri_columns = demo + disease + device_info + position + label
+mri_categorical = (
+    discrete_demo
+    + discrete_disease
+    + discrete_device_info
+    + discrete_position
+    + discrete_label
+)
+
+create_table1(
+    "MRI_indication",
+    mri_columns,
+    mri_categorical,
+    df,
+    "MR_indication_group",
+)
